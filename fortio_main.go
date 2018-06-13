@@ -26,6 +26,8 @@ import (
 	"strings"
 	"time"
 
+	appd "appdynamics"
+
 	"istio.io/fortio/bincommon"
 	"istio.io/fortio/fnet"
 
@@ -137,6 +139,22 @@ var (
 )
 
 func main() {
+	cfg := appd.Config{}
+
+	cfg.AppName = "fortio"
+	cfg.Controller.Host = "35.197.28.166"
+	cfg.Controller.Port = 8090
+	cfg.Controller.UseSSL = false
+	cfg.Controller.Account = "customer1"
+	cfg.Controller.AccessKey = "d54b76e7-85d5-41ee-98ff-199e70fbbd83"
+	cfg.InitTimeoutMs = 3000
+
+	if err := appd.InitSDK(&cfg); err != nil {
+		fmt.Printf("Error initializing the AppDynamics SDK\n")
+	} else {
+		fmt.Printf("Initialized AppDynamics SDK successfully\n")
+	}
+
 	bincommon.SharedMain()
 	flag.Var(&proxiesFlags, "P", "Proxies to run, e.g -P \"localport1 dest_host1:dest_port1\" -P \"[::1]:0 www.google.com:443\" ...")
 	if len(os.Args) < 2 {
@@ -163,16 +181,32 @@ func main() {
 	isServer := false
 	switch command {
 	case "curl":
+		// start the "curl" transaction
+		btHandle := appd.StartBT("curl", "")
 		fortioLoad(true, nil)
+		// end the transaction
+		appd.EndBT(btHandle)
 	case "load":
+		// start the "load" transaction
+		btHandle := appd.StartBT("load", "")
 		fortioLoad(*curlFlag, percList)
+		// end the transaction
+		appd.EndBT(btHandle)
 	case "redirect":
+		// start the "redirst" transaction
+		btHandle := appd.StartBT("redirect", "")
 		isServer = true
 		fhttp.RedirectToHTTPS(*redirectFlag)
+		// end the transaction
+		appd.EndBT(btHandle)
 	case "report":
 		isServer = true
 		if *redirectFlag != disabled {
+			// start the "report" transaction
+			btHandle := appd.StartBT("report", "")
 			fhttp.RedirectToHTTPS(*redirectFlag)
+			// end the transaction
+			appd.EndBT(btHandle)
 		}
 		if !ui.Report(baseURL, *echoPortFlag, *staticDirFlag, *dataDirFlag) {
 			os.Exit(1) // error already logged
@@ -180,10 +214,18 @@ func main() {
 	case "server":
 		isServer = true
 		if *grpcPortFlag != disabled {
+			// start the "ping server" transaction
+			btHandle := appd.StartBT("ping-server", "")
 			fgrpc.PingServer(*grpcPortFlag, *certFlag, *keyFlag, fgrpc.DefaultHealthServiceName, uint32(*maxStreamsFlag))
+			// end the transaction
+			appd.EndBT(btHandle)
 		}
 		if *redirectFlag != disabled {
+			// start the "redirect server" transaction
+			btHandle := appd.StartBT("https-redirect-server", "")
 			fhttp.RedirectToHTTPS(*redirectFlag)
+			// end the transaction
+			appd.EndBT(btHandle)
 		}
 		if !ui.Serve(baseURL, *echoPortFlag, *echoDbgPathFlag, *uiPathFlag, *staticDirFlag, *dataDirFlag, percList) {
 			os.Exit(1) // error already logged
@@ -193,7 +235,11 @@ func main() {
 			if len(s) != 2 {
 				log.Errf("Invalid syntax for proxy \"%s\", should be \"localAddr destHost:destPort\"", proxy)
 			}
+			// start the "proxy server" transaction
+			btHandle := appd.StartBT("proxy-server", "")
 			fnet.ProxyToDestination(s[0], s[1])
+			// end the transaction
+			appd.EndBT(btHandle)
 		}
 	case "grpcping":
 		grpcClient()
@@ -215,6 +261,8 @@ func main() {
 			select {}
 		}
 	}
+	// Stop/Clean up the AppD SDK.
+	appd.TerminateSDK()
 }
 
 func fortioLoad(justCurl bool, percList []float64) {
